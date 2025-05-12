@@ -265,12 +265,18 @@ const DebtRepaymentApp: React.FC = () => {
           animate={{ y: 0 }}
           transition={{ type: "spring", stiffness: 300, damping: 20 }}
         >
-          <h1 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 text-transparent bg-clip-text mb-2">
-            借金返済ビジュアライザー
+          <h1 className="text-3xl md:text-5xl font-extrabold tracking-tight mb-2">
+            <span className="inline-block relative">
+              <span className="bg-gradient-to-r from-blue-600 via-indigo-500 to-purple-600 text-transparent bg-clip-text animate-gradient-x">
+                借金返済
+              </span>
+              <span className="bg-gradient-to-r from-emerald-500 via-blue-600 to-indigo-600 text-transparent bg-clip-text animate-pulse">
+                くん
+              </span>
+              <span className="absolute -bottom-1 left-0 w-full h-[3px] bg-gradient-to-r from-blue-600 to-purple-600 rounded-full transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300"></span>
+            </span>
           </h1>
-          <p className="text-gray-500">
-            あなたの借金返済計画をグラフィカルに可視化します
-          </p>
+          <p className="text-gray-500">借金返済計画のすべて</p>
         </motion.div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
