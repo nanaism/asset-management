@@ -13,7 +13,6 @@ import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { animated, useSpring } from "@react-spring/web";
 import { AnimatePresence, motion } from "framer-motion";
-import Lottie from "lottie-react";
 import {
   ArrowRight,
   BarChart3,
@@ -25,7 +24,9 @@ import {
   Trash2,
   TrendingDown,
 } from "lucide-react";
+import dynamic from "next/dynamic";
 import React, { useCallback, useEffect, useState } from "react";
+// recharts から直接インポート (dynamic import は Lottie のみ)
 import {
   Area,
   AreaChart,
@@ -37,10 +38,19 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+// Tooltip の formatter の型定義をインポート
+import {
+  NameType,
+  ValueType,
+} from "recharts/types/component/DefaultTooltipContent";
+
 import moneyAnimation from "./money-animation.json";
 import savingsAnimation from "./savings-animation.json";
 
-// 型定義
+// Lottie のみ dynamic import
+const DynamicLottie = dynamic(() => import("lottie-react"), { ssr: false });
+
+// --- 型定義 (変更なし) ---
 interface Expense {
   id: string;
   description: string;
@@ -63,9 +73,7 @@ interface RepaymentPlanItem {
   availableForDebt: number;
 }
 
-// メインコンポーネント
 const DebtRepaymentApp: React.FC = () => {
-  // スタイル定義
   const cardStyle = {
     borderRadius: "12px",
     overflow: "hidden" as const,
@@ -81,7 +89,6 @@ const DebtRepaymentApp: React.FC = () => {
     transition: "all 0.2s ease-in-out",
   };
 
-  // 状態管理
   const [debtAmount, setDebtAmount] = useState<number>(1000000);
   const [remainingMonths, setRemainingMonths] = useState<number>(24);
   const [monthlyIncome, setMonthlyIncome] = useState<number>(300000);
@@ -97,8 +104,13 @@ const DebtRepaymentApp: React.FC = () => {
   const [repaymentPlan, setRepaymentPlan] = useState<RepaymentPlanItem[]>([]);
   const [isCalculated, setIsCalculated] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<string>("input");
+  const [isClient, setIsClient] = useState(false); // クライアントサイドかどうかを判定するフラグ
 
-  // スプリングアニメーション
+  useEffect(() => {
+    // マウント後にクライアントサイドであることを示す
+    setIsClient(true);
+  }, []);
+
   const fadeIn = useSpring({
     opacity: isCalculated ? 1 : 0,
     transform: isCalculated ? "translateY(0)" : "translateY(20px)",
@@ -116,22 +128,18 @@ const DebtRepaymentApp: React.FC = () => {
     config: { tension: 300, friction: 10 },
   });
 
-  // 返済計画の計算
   const calculateRepaymentPlan = useCallback((): void => {
     let remainingDebt = debtAmount;
     const plan: RepaymentPlanItem[] = [];
 
     for (let month = 1; month <= remainingMonths; month++) {
-      // 各月の支出を計算（その月まで有効な支出を合計）
       const currentExpenses = expenses.reduce((total, expense) => {
-        // 支出の終了月を確認
         return total + (month <= expense.endMonth ? expense.amount : 0);
       }, 0);
 
       const availableForDebt = monthlyIncome - currentExpenses;
 
       if (availableForDebt <= 0) {
-        // 返済に回せるお金がない場合
         plan.push({
           month,
           debtAmount: remainingDebt,
@@ -141,7 +149,6 @@ const DebtRepaymentApp: React.FC = () => {
           availableForDebt,
         });
       } else if (remainingDebt <= availableForDebt) {
-        // 最終返済月
         plan.push({
           month,
           debtAmount: 0,
@@ -153,7 +160,6 @@ const DebtRepaymentApp: React.FC = () => {
         remainingDebt = 0;
         break;
       } else {
-        // 通常の返済月
         remainingDebt -= availableForDebt;
         plan.push({
           month,
@@ -181,7 +187,6 @@ const DebtRepaymentApp: React.FC = () => {
     setActiveTab("chart");
   };
 
-  // 支出の追加処理
   const handleAddExpense = (): void => {
     if (newExpense.description.trim() && newExpense.amount > 0) {
       setExpenses([
@@ -197,25 +202,30 @@ const DebtRepaymentApp: React.FC = () => {
     }
   };
 
-  // 支出の削除処理
   const handleRemoveExpense = (id: string): void => {
     setExpenses(expenses.filter((expense) => expense.id !== id));
   };
 
-  // 支出の合計を計算
   const getTotalExpenses = (): number => {
     return expenses.reduce((total, expense) => total + expense.amount, 0);
   };
 
-  // フォーマット関数
   const formatCurrency = (value: number): string => {
+    // value が number でない場合のガードを追加
+    if (typeof value !== "number") {
+      return "¥NaN"; // または適切なデフォルト値
+    }
     return new Intl.NumberFormat("ja-JP", {
       style: "currency",
       currency: "JPY",
     }).format(value);
   };
 
-  const formatTooltip = (value: number, name: string): [string, string] => {
+  // ★★★ formatTooltip の型定義を修正 ★★★
+  const formatTooltip = (
+    value: ValueType,
+    name: NameType
+  ): [string, string] => {
     const labels: Record<string, string> = {
       debtAmount: "残債",
       payment: "返済額",
@@ -223,7 +233,22 @@ const DebtRepaymentApp: React.FC = () => {
       income: "収入",
       availableForDebt: "返済可能額",
     };
-    return [formatCurrency(value), labels[name] || name];
+
+    let displayValue: string;
+
+    // value の型に応じてフォーマットを調整
+    if (typeof value === "number") {
+      displayValue = formatCurrency(value);
+    } else if (typeof value === "string") {
+      // 文字列の場合、数値に変換しようと試みるか、そのまま表示
+      const num = parseFloat(value);
+      displayValue = !isNaN(num) ? formatCurrency(num) : value;
+    } else {
+      // 配列やその他の型の場合は単純な表示にする (例: ハイフン)
+      displayValue = "-";
+    }
+
+    return [displayValue, labels[name as string] || String(name)];
   };
 
   return (
@@ -283,6 +308,7 @@ const DebtRepaymentApp: React.FC = () => {
             </TabsList>
           </motion.div>
 
+          {/* --- Input Tab Content (変更なし) --- */}
           <TabsContent value="input">
             <motion.div
               className="grid grid-cols-1 lg:grid-cols-2 gap-6"
@@ -447,7 +473,6 @@ const DebtRepaymentApp: React.FC = () => {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="pt-6">
-                  {/* 現在の支出リスト */}
                   <div className="space-y-3 mb-6">
                     {expenses.length === 0 ? (
                       <p className="text-gray-400 text-center py-4 bg-gray-50 rounded-lg">
@@ -486,7 +511,6 @@ const DebtRepaymentApp: React.FC = () => {
                     )}
                   </div>
 
-                  {/* 総支出額 */}
                   {expenses.length > 0 && (
                     <div className="mb-6 p-4 rounded-lg bg-gray-50 border border-gray-100">
                       <div className="flex justify-between items-center">
@@ -500,7 +524,6 @@ const DebtRepaymentApp: React.FC = () => {
                     </div>
                   )}
 
-                  {/* 新しい支出を追加 */}
                   <div className="space-y-4 bg-blue-50 p-4 rounded-lg border border-blue-100">
                     <h3 className="text-blue-800 font-semibold">
                       新しい支出を追加
@@ -627,10 +650,12 @@ const DebtRepaymentApp: React.FC = () => {
             </motion.div>
           </TabsContent>
 
+          {/* --- Chart Tab Content --- */}
           <TabsContent value="chart">
-            <AnimatePresence>
-              {isCalculated && (
-                <div>
+            {/* isClient が true になってから中身をレンダリング */}
+            {isClient && (
+              <AnimatePresence>
+                {isCalculated && (
                   <div>
                     <animated.div
                       style={{
@@ -644,6 +669,7 @@ const DebtRepaymentApp: React.FC = () => {
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ duration: 0.4, delay: 0.2 }}
                     >
+                      {/* Area Chart Card */}
                       <Card
                         style={cardStyle}
                         className="lg:col-span-3 border-0"
@@ -658,6 +684,7 @@ const DebtRepaymentApp: React.FC = () => {
                         </CardHeader>
                         <CardContent className="pt-6">
                           <div className="h-80">
+                            {/* ResponsiveContainer, AreaChart などは直接使用 */}
                             <ResponsiveContainer width="100%" height="100%">
                               <AreaChart
                                 data={repaymentPlan}
@@ -682,16 +709,17 @@ const DebtRepaymentApp: React.FC = () => {
                                   stroke="#64748b"
                                 />
                                 <YAxis
-                                  tickFormatter={(value) =>
-                                    new Intl.NumberFormat("ja-JP", {
-                                      notation: "compact",
-                                      compactDisplay: "short",
-                                    }).format(value)
+                                  tickFormatter={
+                                    (value) =>
+                                      new Intl.NumberFormat("ja-JP", {
+                                        notation: "compact",
+                                        compactDisplay: "short",
+                                      }).format(value as number) // value が number であることを期待
                                   }
                                   stroke="#64748b"
                                 />
                                 <Tooltip
-                                  formatter={formatTooltip}
+                                  formatter={formatTooltip} // 修正済みの関数を使用
                                   contentStyle={{
                                     backgroundColor:
                                       "rgba(255, 255, 255, 0.95)",
@@ -700,23 +728,6 @@ const DebtRepaymentApp: React.FC = () => {
                                     border: "1px solid #e2e8f0",
                                     color: "#1e293b",
                                   }}
-                                />
-                                <Area
-                                  type="monotone"
-                                  dataKey="debtAmount"
-                                  stackId="1"
-                                  name="残債"
-                                  stroke="#3b82f6"
-                                  fill="url(#colorDebt)"
-                                  activeDot={{ r: 8 }}
-                                />
-                                <Area
-                                  type="monotone"
-                                  dataKey="payment"
-                                  stackId="2"
-                                  name="返済額"
-                                  stroke="#8b5cf6"
-                                  fill="url(#colorPayment)"
                                 />
                                 <defs>
                                   <linearGradient
@@ -756,12 +767,30 @@ const DebtRepaymentApp: React.FC = () => {
                                     />
                                   </linearGradient>
                                 </defs>
+                                <Area
+                                  type="monotone"
+                                  dataKey="debtAmount"
+                                  stackId="1"
+                                  name="残債"
+                                  stroke="#3b82f6"
+                                  fill="url(#colorDebt)"
+                                  activeDot={{ r: 8 }}
+                                />
+                                <Area
+                                  type="monotone"
+                                  dataKey="payment"
+                                  stackId="2"
+                                  name="返済額"
+                                  stroke="#8b5cf6"
+                                  fill="url(#colorPayment)"
+                                />
                               </AreaChart>
                             </ResponsiveContainer>
                           </div>
                         </CardContent>
                       </Card>
 
+                      {/* 返済概要 Card */}
                       <Card style={cardStyle} className="border-0">
                         <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b">
                           <CardTitle className="text-blue-700 flex items-center">
@@ -781,7 +810,8 @@ const DebtRepaymentApp: React.FC = () => {
                                 ease: "linear",
                               }}
                             >
-                              <Lottie
+                              {/* Lottie は dynamic import したコンポーネントを使用 */}
+                              <DynamicLottie
                                 animationData={moneyAnimation}
                                 style={{ width: 120, height: 120 }}
                               />
@@ -846,6 +876,7 @@ const DebtRepaymentApp: React.FC = () => {
                         </CardContent>
                       </Card>
 
+                      {/* 返済期間 Card */}
                       <Card style={cardStyle} className="border-0">
                         <CardHeader className="bg-gradient-to-r from-emerald-50 to-teal-50 border-b">
                           <CardTitle className="text-emerald-700 flex items-center">
@@ -900,6 +931,7 @@ const DebtRepaymentApp: React.FC = () => {
                         </CardContent>
                       </Card>
 
+                      {/* 節約ポイント Card */}
                       <Card style={cardStyle} className="border-0">
                         <CardHeader className="bg-gradient-to-r from-purple-50 to-indigo-50 border-b">
                           <CardTitle className="text-purple-700 flex items-center">
@@ -921,7 +953,8 @@ const DebtRepaymentApp: React.FC = () => {
                                 ease: "easeInOut",
                               }}
                             >
-                              <Lottie
+                              {/* Lottie は dynamic import したコンポーネントを使用 */}
+                              <DynamicLottie
                                 animationData={savingsAnimation}
                                 style={{ width: 120, height: 120 }}
                               />
@@ -993,6 +1026,7 @@ const DebtRepaymentApp: React.FC = () => {
                       </Card>
                     </motion.div>
 
+                    {/* Line Chart Card */}
                     <motion.div
                       initial={{ opacity: 0, y: 20 }}
                       animate={{ opacity: 1, y: 0 }}
@@ -1009,6 +1043,7 @@ const DebtRepaymentApp: React.FC = () => {
                         </CardHeader>
                         <CardContent className="pt-6">
                           <div className="h-80">
+                            {/* ResponsiveContainer, LineChart などは直接使用 */}
                             <ResponsiveContainer width="100%" height="100%">
                               <LineChart
                                 data={repaymentPlan}
@@ -1038,7 +1073,7 @@ const DebtRepaymentApp: React.FC = () => {
                                     new Intl.NumberFormat("ja-JP", {
                                       notation: "compact",
                                       compactDisplay: "short",
-                                    }).format(value)
+                                    }).format(value as number)
                                   }
                                   stroke="#64748b"
                                 />
@@ -1049,12 +1084,12 @@ const DebtRepaymentApp: React.FC = () => {
                                     new Intl.NumberFormat("ja-JP", {
                                       notation: "compact",
                                       compactDisplay: "short",
-                                    }).format(value)
+                                    }).format(value as number)
                                   }
                                   stroke="#64748b"
                                 />
                                 <Tooltip
-                                  formatter={formatTooltip}
+                                  formatter={formatTooltip} // 修正済みの関数を使用
                                   contentStyle={{
                                     backgroundColor:
                                       "rgba(255, 255, 255, 0.95)",
@@ -1132,9 +1167,9 @@ const DebtRepaymentApp: React.FC = () => {
                       </Button>
                     </motion.div>
                   </div>
-                </div>
-              )}
-            </AnimatePresence>
+                )}
+              </AnimatePresence>
+            )}
           </TabsContent>
         </Tabs>
       </div>
